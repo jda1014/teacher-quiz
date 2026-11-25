@@ -16,16 +16,37 @@ const db = window.supabase.createClient(
 
 // DB 함수 부르기. 오류는 짧은 코드(err.code)로 바꿔 던짐
 async function call(fn, args = {}) {
-  const { data, error } = await db.rpc(fn, args);
+  if (!CONFIG_READY) {
+    const e = new Error('config.js 에 Supabase 주소(https://….supabase.co)와 publishable key 를 넣어 주세요.');
+    e.code = 'config'; throw e;
+  }
+  let data, error;
+  try {
+    ({ data, error } = await db.rpc(fn, args));
+  } catch (ex) { error = ex; }
   if (error) {
-    const msg = String(error.message || error);
+    const msg = String(error.message || error) + ' ' + String(error.hint || '') + ' ' + String(error.code || '');
     const known = Object.keys(ERROR_TEXT).find(k => msg.includes(k));
-    const e = new Error(known ? ERROR_TEXT[known] : '연결에 문제가 생겼어요. 잠시 뒤 다시 해 주세요.');
+    const e = new Error(known ? ERROR_TEXT[known] : setupHint(msg, fn));
     e.code = known || 'unknown';
     e.raw = msg;
+    console.warn('[맞춤법 탐정단]', fn, msg);
     throw e;
   }
   return data;
+}
+
+// 설치 문제를 알아보기 쉬운 안내로 바꾸기
+function setupHint(msg, fn) {
+  if (/Could not find the function|PGRST202|does not exist/i.test(msg))
+    return `DB 함수(${fn})를 찾지 못했어요. Supabase SQL Editor 에서 01 → 02 → 03 SQL 을 실행했는지 확인해 주세요.`;
+  if (/Invalid API key|No API key|apikey|JWT|401|PGRST301/i.test(msg))
+    return 'Supabase 키가 맞지 않아요. config.js 의 SUPABASE_KEY 에 publishable key 를 다시 붙여 넣어 주세요.';
+  if (/permission denied|42501/i.test(msg))
+    return 'DB 함수 권한이 없어요. 02_functions.sql 을 다시 실행해 주세요.';
+  if (/Failed to fetch|NetworkError|Load failed|ERR_/i.test(msg))
+    return 'Supabase 에 연결하지 못했어요. config.js 의 SUPABASE_URL 이 맞는지, 인터넷이 되는지 확인해 주세요.';
+  return '연결에 문제가 생겼어요: ' + msg.trim().slice(0, 120);
 }
 
 const ERROR_TEXT = {
