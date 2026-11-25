@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>맞춤법 탐정단 · 학생</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  <script src="config.js"></script>
+  <script src="common.js"></script>
+</head>
+<body>
+<main class="s-wrap">
+  <header class="s-head">
+    <h1>🔍 맞춤법 탐정단</h1>
+  </header>
+
+  <section data-view="loading">
+    <div class="glass card" style="text-align:center;font-family:var(--font-title);font-size:22px">불러오는 중…</div>
+  </section>
+
+  <!-- 1. 입장 -->
+  <section data-view="join" hidden>
+    <form class="glass card" id="join-form" style="display:grid;gap:16px" novalidate>
+      <div class="field">
+        <label for="code">방 번호</label>
+        <input class="input num" id="code" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="4자리" style="font-size:30px;letter-spacing:.2em;text-align:center">
+      </div>
+      <div class="field">
+        <label for="nick">별명 <small class="muted">(1~10자, 진짜 이름 대신 별명도 좋아요)</small></label>
+        <input class="input" id="nick" maxlength="10" autocomplete="off" placeholder="예: 반짝탐정">
+      </div>
+      <div class="field">
+        <label id="animal-label">동물 친구</label>
+        <div class="animals" id="animals" role="group" aria-labelledby="animal-label"></div>
+      </div>
+      <p class="form-error" id="join-error" role="alert"></p>
+      <button class="jelly btn-gold btn-big" type="submit" id="join-btn">들어가기</button>
+    </form>
+  </section>
+
+  <!-- 2. 기다리기 -->
+  <section data-view="wait" hidden>
+    <div class="glass wait-card">
+      <div class="ava" id="wait-ava" aria-hidden="true">🐶</div>
+      <div class="nm" id="wait-nick"></div>
+      <p style="font-family:var(--font-title);font-size:22px">선생님이 시작하면 바로 문제가 나와요!</p>
+      <p class="muted">헷갈리는 맞춤법을 찾아내는 명탐정이 되어 봐요 🔎</p>
+      <button class="jelly btn-ghost" id="rejoin-btn" type="button">다른 이름으로 다시 들어가기</button>
+    </div>
+  </section>
+
+  <!-- 3. 문제 풀기 -->
+  <section data-view="play" hidden style="display:grid;gap:12px">
+    <div class="hud">
+      <span class="pill" id="me-pill"></span>
+      <span class="score-box"><span id="score">0</span><small style="font-size:18px;font-family:var(--font-title)">점</small></span>
+      <span class="pill qno num" id="qno">1번</span>
+    </div>
+    <div class="time-bar" id="time-bar" role="progressbar" aria-label="남은 시간"><div id="time-fill" style="width:100%"></div></div>
+    <div class="golden-band" id="golden-band" hidden>✨ 골든 타임! 정답이면 2점 ✨</div>
+    <div class="glass q-card" id="q-card">
+      <span class="pill q-type" id="q-type"></span>
+      <p class="q-prompt" id="q-prompt"></p>
+      <p class="q-text" id="q-text"></p>
+    </div>
+    <div class="opts" id="opts"></div>
+    <div class="feedback bad" id="feedback" hidden></div>
+    <div class="glass card" id="time-over" hidden style="text-align:center;font-family:var(--font-title);font-size:24px">⏰ 시간 끝! 결과를 기다려요</div>
+  </section>
+
+  <!-- 4. 게임 끝 -->
+  <section data-view="end" hidden style="display:grid;gap:12px">
+    <div class="glass end-card">
+      <p style="font-family:var(--font-title);font-size:20px" id="end-nick"></p>
+      <div class="rank"><span id="end-rank">-</span><small>등</small></div>
+      <p style="font-family:var(--font-title);font-size:24px"><span class="num" id="end-score">0</span>점</p>
+      <p class="muted" id="end-meta"></p>
+    </div>
+    <div class="glass card">
+      <p class="section-title">🏆 TOP 5</p>
+      <ul class="mini-list" id="top5"></ul>
+    </div>
+    <div class="glass card" id="my-wrong-card" hidden>
+      <p class="section-title">📒 다시 보기: 내가 틀린 낱말</p>
+      <ul class="wrong-list" id="my-wrong"></ul>
+    </div>
+  </section>
+
+  <!-- 방이 사라졌을 때 -->
+  <section data-view="gone" hidden>
+    <div class="glass wait-card">
+      <div style="font-size:72px" aria-hidden="true">👋</div>
+      <p style="font-family:var(--font-title);font-size:24px">방이 닫혔어요</p>
+      <p class="muted">선생님이 방을 지웠어요. 새 방 번호로 다시 들어와 주세요.</p>
+      <button class="jelly btn-gold" id="gone-btn" type="button">새 방에 들어가기</button>
+    </div>
+  </section>
+</main>
+
+<script>
+// ---------------------------------------------------------------------
+// 상태
+// ---------------------------------------------------------------------
+const ME_KEY = 'mds-player';     // sessionStorage: 탭마다 다른 학생
+let me = null;                   // { player_id, token, room_id, nickname, animal }
+let room = null;
+let roomWatch = null;
+let timerLoop = null;
+let question = null;
+let busy = false;
+let score = 0;
+let playing = false;
+let endShown = false;
+let animal = null;
+
+// ---------------------------------------------------------------------
+// 시작
+// ---------------------------------------------------------------------
+init();
+async function init() {
+  showView('loading');
+  buildAnimals();
+  const code = new URLSearchParams(location.search).get('code');
+  if (code) $('#code').value = code.replace(/\D/g, '').slice(0, 4);
+  await syncClock();
+
+  me = store.get('sessionStorage', ME_KEY);
+  if (me) {
+    try {
+      const r = await fetchRoom(me.room_id);
+      const { data } = await db.from('players').select('id').eq('id', me.player_id).maybeSingle();
+      // 다른 방 QR 을 찍고 들어왔다면 새로 입장
+      if (r && data && (!code || code === me.room_id)) { enter(r); return; }
+    } catch (e) {}
+    store.del('sessionStorage', ME_KEY);
+    me = null;
+  }
+  openJoin();
+}
+
+// ---------------------------------------------------------------------
+// 1. 입장
+// ---------------------------------------------------------------------
+function buildAnimals() {
+  $('#animals').replaceChildren(...ANIMALS.map(a => el('button', {
+    class: 'animal', type: 'button', 'aria-pressed': 'false', 'aria-label': a.name, 'data-id': a.id,
+    onclick: e => {
+      animal = a.id;
+      document.querySelectorAll('.animal').forEach(b => b.setAttribute('aria-pressed', b.dataset.id === a.id ? 'true' : 'false'));
+    }
+  }, a.emoji, el('small', {}, a.name))));
+}
+
+function openJoin() {
+  stop();
+  showView('join');
+  $('#join-error').textContent = '';
+  ($('#code').value ? $('#nick') : $('#code')).focus();
+}
+
+$('#join-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const code = $('#code').value.trim();
+  const nick = $('#nick').value.trim();
+  const err = $('#join-error');
+  if (!/^\d{4}$/.test(code)) { err.textContent = '방 번호 4자리를 써 주세요.'; return; }
+  if (nick.length < 1 || nick.length > 10) { err.textContent = '별명은 1~10자로 써 주세요.'; return; }
+  if (!animal) { err.textContent = '동물 친구를 골라 주세요.'; return; }
+  err.textContent = '';
+  $('#join-btn').disabled = true;
+  try {
+    me = await call('join_room', { p_room: code, p_nickname: nick, p_animal: animal });
+    store.set('sessionStorage', ME_KEY, me);
+    enter(await fetchRoom(me.room_id));
+  } catch (ex) {
+    err.textContent = ex.message;
+  } finally { $('#join-btn').disabled = false; }
+});
+
+$('#rejoin-btn').addEventListener('click', () => {
+  store.del('sessionStorage', ME_KEY);
+  me = null;
+  $('#nick').value = '';
+  openJoin();
+});
+$('#gone-btn').addEventListener('click', () => {
+  $('#code').value = '';
+  history.replaceState(null, '', location.pathname);
+  openJoin();
+});
+
+// ---------------------------------------------------------------------
+// 방에 들어가기: 학생은 방 상태만 구독 (점수 알림은 받지 않음)
+// ---------------------------------------------------------------------
+function enter(r) {
+  room = r;
+  playing = false; endShown = false;
+  $('#wait-ava').textContent = animalEmoji(me.animal);
+  $('#wait-nick').textContent = me.nickname;
+  $('#me-pill').textContent = animalEmoji(me.animal) + ' ' + me.nickname;
+  stop();
+  roomWatch = watch({
+    table: 'rooms', filter: `id=eq.${me.room_id}`,
+    refresh: async () => {
+      const fresh = await fetchRoom(me.room_id);
+      if (!fresh) { roomGone(); return; }
+      room = fresh;
+      applyRoom();
+    }
+  });
+  applyRoom();
+}
+
+function stop() {
+  roomWatch && roomWatch.stop();
+  roomWatch = null;
+  clearInterval(timerLoop);
+}
+
+function roomGone() {
+  stop();
+  store.del('sessionStorage', ME_KEY);
+  me = null;
+  showView('gone');
+}
+
+// 방 상태 → 화면 (이 규칙은 여기 한 곳에만)
+function applyRoom() {
+  if (!room) return;
+  if (room.status === 'waiting') showView('wait');
+  else if (room.status === 'playing') { if (!playing) startPlay(); }
+  else if (room.status === 'ended') { if (!endShown) showEnd(); }
+}
+
+// ---------------------------------------------------------------------
+// 2. 문제 풀기
+// ---------------------------------------------------------------------
+async function startPlay() {
+  playing = true;
+  showView('play');
+  $('#time-over').hidden = true;
+  clearInterval(timerLoop);
+  timerLoop = setInterval(tick, 250);
+  tick();
+  try {
+    const res = await call('next_question', { p_player: me.player_id, p_token: me.token });
+    if (res.result === 'closed') { timeOver(); return; }
+    score = res.score;
+    $('#score').textContent = score;
+    showQuestion(res.question);
+  } catch (e) {
+    if (e.code === 'no_room' || e.code === 'not_allowed') { roomGone(); return; }
+    toast(e.message);
+    playing = false;
+  }
+}
+
+function tick() {
+  if (!room) return;
+  const left = secondsLeft(room.ends_at);
+  const frac = room.duration_sec ? Math.max(0, Math.min(1, left / room.duration_sec)) : 0;
+  $('#time-fill').style.width = (frac * 100) + '%';
+  $('#time-bar').classList.toggle('low', left <= 10);
+  $('#time-bar').setAttribute('aria-valuenow', Math.ceil(left));
+  const golden = room.golden_until && new Date(room.golden_until).getTime() > serverNow();
+  $('#golden-band').hidden = !golden || room.status !== 'playing';
+  if (room.status === 'playing' && left <= 0) timeOver();
+}
+
+function timeOver() {
+  document.querySelectorAll('#opts .opt').forEach(b => b.disabled = true);
+  $('#time-over').hidden = false;
+}
+
+function showQuestion(q) {
+  question = q;
+  busy = false;
+  $('#feedback').hidden = true;
+  $('#q-type').textContent = q.label;
+  $('#q-prompt').textContent = q.prompt;
+  $('#qno').textContent = q.no + '번';
+  const text = $('#q-text');
+  text.hidden = !q.text;
+  renderSentence(text, q.text);
+
+  const box = $('#opts');
+  box.className = 'opts' + (q.qtype === 'find_wrong' ? ' sentences' : '');
+  box.replaceChildren(...q.options.map(o => el('button', {
+    class: 'opt' + (q.qtype === 'ox' ? ' ox' : ''), type: 'button',
+    'aria-label': q.qtype === 'ox' ? (o === 'O' ? 'O, 바르게 썼어요' : 'X, 틀렸어요') : o,
+    onclick: e => choose(o, e.currentTarget)
+  }, o)));
+  const card = $('#q-card');
+  card.classList.remove('pop'); void card.offsetWidth; card.classList.add('pop');
+}
+
+async function choose(choice, btn) {
+  if (busy) return;
+  busy = true;
+  const buttons = [...document.querySelectorAll('#opts .opt')];
+  buttons.forEach(b => b.disabled = true);
+  let res;
+  try {
+    res = await call('submit_answer', { p_player: me.player_id, p_token: me.token, p_choice: choice });
+  } catch (e) {
+    if (e.code === 'no_room' || e.code === 'not_allowed') { roomGone(); return; }
+    toast(e.message);
+    buttons.forEach(b => b.disabled = false);
+    busy = false;
+    return;
+  }
+
+  if (res.result === 'closed') { timeOver(); return; }
+  if (res.result === 'locked') {
+    setTimeout(() => { buttons.forEach(b => b.disabled = false); busy = false; }, 400);
+    return;
+  }
+  if (res.result === 'ok' && res.question) { showQuestion(res.question); return; }
+
+  score = res.score;
+  $('#score').textContent = score;
+
+  if (res.result === 'correct') {
+    btn.classList.add('correct');
+    const g = el('div', { class: 'gain' }, '+' + res.gain);
+    $('#q-card').appendChild(g);
+    setTimeout(() => g.remove(), 900);
+    if (res.bonus > 0) {
+      setTimeout(() => openBox(res.bonus, () => next(res.next)), 350);
+    } else {
+      setTimeout(() => next(res.next), 650);
+    }
+  } else {
+    btn.classList.add('wrong');
+    buttons.forEach(b => { if (b.textContent === res.answer) b.classList.add('correct'); });
+    const fb = $('#feedback');
+    fb.replaceChildren(
+      el('div', {}, question.qtype === 'find_wrong' ? '바르게 고치면' : '바른 문장'),
+      el('div', { class: 'fix' }, res.fix || ''),
+      res.tip ? el('div', {}, '💡 ' + res.tip) : null);
+    fb.hidden = false;
+    setTimeout(() => next(res.next), 1500);     // 오답 뒤 1.5초 동안 해설 읽기
+  }
+}
+
+function next(q) {
+  if (!room || room.status !== 'playing' || secondsLeft(room.ends_at) <= 0) { timeOver(); return; }
+  if (q) showQuestion(q);
+}
+
+// 보물 상자: 1.6초 동안 상자 화면 + 색종이
+function openBox(bonus, done) {
+  const ov = el('div', { class: 'box-overlay', role: 'alert' },
+    el('div', { class: 'glass box-card' },
+      el('div', { class: 'box', 'aria-hidden': 'true' }, '🎁'),
+      el('div', { style: 'font-family:var(--font-title);font-size:24px' }, '보물 상자가 열렸어요!'),
+      el('div', { class: 'plus' }, '+' + bonus)));
+  document.body.appendChild(ov);
+  confettiBurst();
+  setTimeout(() => { ov.remove(); done(); }, 1600);
+}
+
+// ---------------------------------------------------------------------
+// 3. 게임 끝
+// ---------------------------------------------------------------------
+async function showEnd() {
+  endShown = true;
+  playing = false;
+  clearInterval(timerLoop);
+  document.querySelectorAll('.box-overlay').forEach(o => o.remove());
+  showView('end');
+  $('#end-nick').textContent = animalEmoji(me.animal) + ' ' + me.nickname;
+  try {
+    const ranked = rankPlayers(await fetchPlayers(me.room_id));
+    const idx = ranked.findIndex(p => p.id === me.player_id);
+    const mine = ranked[idx];
+    if (mine) {
+      $('#end-rank').textContent = idx + 1;
+      $('#end-score').textContent = mine.score;
+      $('#end-meta').textContent = `맞힌 문제 ${mine.correct_count}개 · 보너스 +${mine.bonus_total} · 전체 ${ranked.length}명`;
+    }
+    $('#top5').replaceChildren(...ranked.slice(0, 5).map((p, i) => el('li', { class: p.id === me.player_id ? 'me' : null },
+      el('span', { class: 'r' }, i + 1), animalEmoji(p.animal), ' ', el('span', {}, p.nickname),
+      el('span', { class: 's' }, p.score + '점'))));
+  } catch (e) { toast('순위를 불러오지 못했어요.'); }
+
+  try {
+    const wrong = await call('my_wrong_words', { p_player: me.player_id, p_token: me.token }) || [];
+    $('#my-wrong-card').hidden = wrong.length === 0;
+    $('#my-wrong').replaceChildren(...wrong.map(w => el('li', {},
+      el('div', { class: 'w-top' }, el('span', { class: 'w-word' }, wordPairText(w))),
+      el('div', { class: 'w-tip' }, '💡 ' + w.tip))));
+  } catch (e) {}
+}
+</script>
+</body>
+</html>

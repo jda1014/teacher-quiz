@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>맞춤법 탐정단 · 선생님</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+  <script src="config.js"></script>
+  <script src="common.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <header class="t-top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">🔍</span>
+      <div><h1>맞춤법 탐정단</h1><p>선생님 화면</p></div>
+    </div>
+    <div class="spacer"></div>
+    <span class="pill" id="room-pill" hidden></span>
+  </header>
+
+  <!-- 불러오는 중 -->
+  <section data-view="loading">
+    <div class="glass card" style="text-align:center;font-family:var(--font-title);font-size:24px">불러오는 중…</div>
+  </section>
+
+  <!-- 1. 방 만들기 -->
+  <section data-view="setup" hidden>
+    <div class="glass card" id="pw-card" hidden style="max-width:520px;margin:40px auto;display:grid;gap:14px">
+      <h2 class="section-title">선생님 비밀번호</h2>
+      <p class="muted">03_words.sql 에서 정한 선생님용 비밀번호를 입력하세요. 이 컴퓨터에 기억해 둡니다.</p>
+      <form id="pw-form" class="row">
+        <input class="input" id="pw-input" type="password" autocomplete="current-password" aria-label="선생님 비밀번호" style="flex:1">
+        <button class="jelly btn-ink" type="submit">확인</button>
+      </form>
+    </div>
+
+    <div class="setup-grid" id="setup-main" hidden>
+      <div class="glass card">
+        <div class="row" style="margin-bottom:14px">
+          <h2 class="section-title" style="margin:0">오늘 찾을 맞춤법 고르기</h2>
+          <div class="spacer"></div>
+          <button class="chip" type="button" id="sel-all">전체</button>
+          <button class="chip" type="button" id="sel-none">모두 해제</button>
+        </div>
+        <div id="word-blocks"></div>
+      </div>
+      <aside class="setup-side">
+        <div class="glass card" style="display:grid;gap:14px">
+          <div>
+            <div class="section-title">게임 시간</div>
+            <div class="seg" id="dur-seg">
+              <button class="chip" type="button" data-dur="60">1분</button>
+              <button class="chip" type="button" data-dur="120" aria-pressed="true">2분</button>
+              <button class="chip" type="button" data-dur="180">3분</button>
+            </div>
+          </div>
+          <label class="toggle">🎁 보물 상자 보너스 <input type="checkbox" id="opt-bonus" checked></label>
+          <label class="toggle">🙈 마지막 30초 순위 가리기 <input type="checkbox" id="opt-blind" checked></label>
+          <p class="count-line">고른 낱말 <span class="num" id="sel-count">0</span>개 <small class="muted">(6개 이상)</small></p>
+          <button class="jelly btn-gold btn-big" id="create-btn" disabled>방 만들기</button>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- 2. 대기실 -->
+  <section data-view="lobby" hidden>
+    <div class="lobby-grid">
+      <div class="glass card qr-card">
+        <p class="section-title" style="margin:0">휴대폰 카메라로 찍어요</p>
+        <div class="qr-box" id="qr"></div>
+        <div>
+          <p class="muted" style="font-family:var(--font-title);font-size:18px">방 번호</p>
+          <div class="room-code" id="lobby-code">----</div>
+        </div>
+        <p class="join-url" id="join-url"></p>
+      </div>
+      <div class="glass card" style="display:grid;gap:16px;align-content:start">
+        <div class="row">
+          <div>
+            <p class="section-title" style="margin:0">들어온 탐정</p>
+            <p class="muted" id="lobby-settings"></p>
+          </div>
+          <div class="spacer"></div>
+          <div class="big-count"><span id="lobby-count">0</span><small style="font-size:22px">명</small></div>
+        </div>
+        <div>
+          <p style="font-weight:800;margin-bottom:6px">오늘의 낱말</p>
+          <div class="chips" id="lobby-words"></div>
+        </div>
+        <div class="player-grid" id="lobby-players"></div>
+        <p class="muted" id="lobby-empty" style="text-align:center;padding:30px 0;font-size:18px">아직 아무도 없어요. QR 코드를 찍어 들어오세요!</p>
+        <div class="row">
+          <button class="jelly btn-ghost" id="lobby-delete">방 지우기</button>
+          <div class="spacer"></div>
+          <button class="jelly btn-gold btn-big" id="start-btn" disabled>게임 시작 ▶</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. 게임 중 -->
+  <section data-view="play" hidden>
+    <div class="play-grid">
+      <div class="glass card race-card">
+        <div class="row">
+          <h2 class="section-title" style="margin:0">🏁 탐정 레이스</h2>
+          <span class="muted" id="race-count"></span>
+          <div class="spacer"></div>
+          <button class="jelly btn-gold" id="golden-btn">✨ 골든 타임 (20초 동안 2점)</button>
+          <button class="jelly btn-ghost" id="blind-btn">🙈 순위 가리기</button>
+          <button class="jelly btn-coral" id="end-btn">■ 게임 종료</button>
+        </div>
+        <div class="race" id="race" aria-live="off"></div>
+        <div class="blind-cover" id="blind-cover" hidden>🙈 순위 비공개!<small>끝날 때까지 누가 1등일지 몰라요</small></div>
+      </div>
+      <aside class="side">
+        <div class="glass card">
+          <div class="timer" id="timer">
+            <svg viewBox="0 0 190 190" aria-hidden="true">
+              <circle cx="95" cy="95" r="84" fill="none" stroke="rgba(31,42,77,.1)" stroke-width="14"/>
+              <circle id="ring" cx="95" cy="95" r="84" fill="none" stroke="#2fae8c" stroke-width="14" stroke-linecap="round"/>
+            </svg>
+            <div class="t-txt" id="t-txt" aria-live="off">00:00</div>
+          </div>
+        </div>
+        <div class="glass card">
+          <div class="stats">
+            <div class="stat"><div class="k">정답률</div><div class="v" id="st-rate">-</div></div>
+            <div class="stat"><div class="k">열린 상자</div><div class="v" id="st-box">0</div></div>
+            <div class="stat"><div class="k">푼 문제 합계</div><div class="v" id="st-total">0</div></div>
+            <div class="stat"><div class="k">참가</div><div class="v" id="st-players">0</div></div>
+            <div class="stat wide"><div class="k">지금 가장 많이 틀리는 낱말</div><div class="v" id="st-hard">-</div></div>
+          </div>
+        </div>
+        <div class="glass card">
+          <p class="section-title" style="font-size:18px">방금 일어난 일</p>
+          <ul class="news" id="news"></ul>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- 4. 결과 -->
+  <section data-view="result" hidden>
+    <div class="result-grid">
+      <div class="glass card">
+        <h2 class="section-title" style="text-align:center;font-size:32px">🏆 오늘의 명탐정</h2>
+        <div class="podium" id="podium"></div>
+        <div class="runner-cards" id="runners"></div>
+        <div class="rest-list" id="rest"></div>
+      </div>
+      <aside class="side">
+        <div class="glass card">
+          <p class="section-title">🔎 우리 반이 많이 틀린 낱말 TOP 5</p>
+          <ul class="wrong-list" id="wrong-list"></ul>
+          <p class="muted" id="wrong-empty" hidden>틀린 낱말이 없어요. 모두 명탐정!</p>
+          <button class="jelly btn-ghost" id="copy-btn" style="margin-top:12px;width:100%">📋 목록 복사 (별명 없이)</button>
+        </div>
+        <div class="glass card ctrl">
+          <button class="jelly btn-coral" id="delete-btn">🗑 학생 기록 지우기</button>
+          <button class="jelly btn-ink" id="new-btn">＋ 새 게임 만들기</button>
+          <p class="muted" style="font-size:14px">수업이 끝나면 학생 기록을 꼭 지워 주세요. 별명, 점수, 답안이 모두 사라집니다.</p>
+        </div>
+      </aside>
+    </div>
+  </section>
+</div>
+
+<script>
+// ---------------------------------------------------------------------
+// 상태
+// ---------------------------------------------------------------------
+const HOST_KEY = 'mds-host';         // localStorage: { room_id, secret }
+const PW_KEY = 'mds-teacher-pw';     // localStorage: 선생님 비밀번호
+let words = [];                      // list_words 결과
+let selected = new Set();
+let duration = 120;
+let host = null;                     // { room_id, secret }
+let room = null;
+let players = [];
+let roomWatch = null, playerWatch = null;
+let timerLoop = null, statsLoop = null;
+let ending = false;
+let news = [];
+let prevMap = new Map();
+let firstCorrectDone = false;
+let wrongTop = [];
+let currentView = null;
+let renderTimer = null, lastRender = 0;
+const raceRows = new Map();
+const RING_LEN = 2 * Math.PI * 84;
+
+// ---------------------------------------------------------------------
+// 시작
+// ---------------------------------------------------------------------
+init();
+async function init() {
+  showView('loading');
+  await syncClock();
+  host = store.get('localStorage', HOST_KEY);
+  if (host) {
+    try {
+      const r = await fetchRoom(host.room_id);
+      if (r) { await enterRoom(r); return; }
+    } catch (e) { /* 아래로 */ }
+    store.del('localStorage', HOST_KEY);
+    host = null;
+  }
+  openSetup();
+}
+
+// ---------------------------------------------------------------------
+// 1. 방 만들기
+// ---------------------------------------------------------------------
+async function openSetup() {
+  stopWatches();
+  room = null; players = []; currentView = null; $('#room-pill').hidden = true;
+  showView('setup');
+  const pw = store.get('localStorage', PW_KEY);
+  if (pw && await loadWords(pw)) return;
+  $('#pw-card').hidden = false;
+  $('#setup-main').hidden = true;
+  $('#pw-input').focus();
+}
+
+$('#pw-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const pw = $('#pw-input').value.trim();
+  if (!pw) return;
+  if (await loadWords(pw)) store.set('localStorage', PW_KEY, pw);
+});
+
+async function loadWords(pw) {
+  try {
+    words = await call('list_words', { p_password: pw });
+  } catch (e) {
+    store.del('localStorage', PW_KEY);
+    toast(e.message);
+    return false;
+  }
+  $('#pw-card').hidden = true;
+  $('#setup-main').hidden = false;
+  if (selected.size === 0) words.forEach(w => selected.add(w.id));   // 처음엔 모두 선택
+  renderWordBlocks();
+  return true;
+}
+
+function renderWordBlocks() {
+  const box = $('#word-blocks');
+  box.replaceChildren();
+  for (const cat of ['A', 'B', 'C', 'D']) {
+    const list = words.filter(w => w.category === cat);
+    if (!list.length) continue;
+    const quick = el('button', { class: 'pill', type: 'button', onclick: () => {
+      const allOn = list.every(w => selected.has(w.id));
+      list.forEach(w => allOn ? selected.delete(w.id) : selected.add(w.id));
+      renderWordBlocks();
+    } }, list.every(w => selected.has(w.id)) ? '이 묶음 해제' : '이 묶음만 더하기');
+    const chips = el('div', { class: 'chips' }, list.map(w =>
+      el('button', {
+        class: 'chip', type: 'button', 'aria-pressed': selected.has(w.id) ? 'true' : 'false',
+        title: w.tip,
+        onclick: () => { selected.has(w.id) ? selected.delete(w.id) : selected.add(w.id); renderWordBlocks(); }
+      }, w.correct, el('small', {}, (cat === 'A' || cat === 'B') ? '· ' + w.wrong : '✕ ' + w.wrong))));
+    box.appendChild(el('div', { class: 'cat-block' },
+      el('h3', {}, `${cat}. ${CATEGORY[cat]}`, quick), chips));
+  }
+  $('#sel-count').textContent = selected.size;
+  $('#create-btn').disabled = selected.size < 6;
+}
+$('#sel-all').onclick = () => { words.forEach(w => selected.add(w.id)); renderWordBlocks(); };
+$('#sel-none').onclick = () => { selected.clear(); renderWordBlocks(); };
+document.querySelectorAll('#dur-seg .chip').forEach(b => b.addEventListener('click', () => {
+  duration = Number(b.dataset.dur);
+  document.querySelectorAll('#dur-seg .chip').forEach(x => x.setAttribute('aria-pressed', x === b ? 'true' : 'false'));
+}));
+
+$('#create-btn').addEventListener('click', async () => {
+  const btn = $('#create-btn');
+  btn.disabled = true;
+  try {
+    const res = await call('create_room', {
+      p_password: store.get('localStorage', PW_KEY),
+      p_word_ids: [...selected],
+      p_duration: duration,
+      p_bonus: $('#opt-bonus').checked,
+      p_blind: $('#opt-blind').checked
+    });
+    host = { room_id: res.room_id, secret: res.host_secret };
+    store.set('localStorage', HOST_KEY, host);
+    await enterRoom(await fetchRoom(host.room_id));
+  } catch (e) {
+    toast(e.message);
+    if (e.code === 'wrong_password') { store.del('localStorage', PW_KEY); openSetup(); }
+  } finally { btn.disabled = selected.size < 6; }
+});
+
+// ---------------------------------------------------------------------
+// 방에 들어가기: 실시간 구독 + 상태에 맞는 화면
+// ---------------------------------------------------------------------
+async function enterRoom(r) {
+  room = r;
+  if (!words.length) {
+    try { words = await call('list_words', { p_room: host.room_id, p_secret: host.secret }); } catch (e) {}
+  }
+  $('#room-pill').hidden = false;
+  $('#room-pill').textContent = '방 ' + room.id;
+  news = []; prevMap = new Map(); firstCorrectDone = false; ending = false;
+
+  stopWatches();
+  roomWatch = watch({
+    table: 'rooms', filter: `id=eq.${room.id}`,
+    refresh: async () => {
+      const fresh = await fetchRoom(host.room_id);
+      if (!fresh) { roomGone(); return; }
+      const changed = fresh.status !== room.status;
+      room = fresh;
+      if (changed) route(); else scheduleRender();
+    }
+  });
+  playerWatch = watch({
+    table: 'players', filter: `room_id=eq.${room.id}`,
+    refresh: async () => {
+      players = await fetchPlayers(room.id);
+      makeNews();
+      scheduleRender();
+    }
+  });
+  players = await fetchPlayers(room.id).catch(() => []);
+  prevMap = new Map(players.map(p => [p.id, { ...p }]));
+  firstCorrectDone = players.some(p => p.correct_count > 0);
+  route();
+}
+
+function stopWatches() {
+  roomWatch && roomWatch.stop(); playerWatch && playerWatch.stop();
+  roomWatch = playerWatch = null;
+  clearInterval(timerLoop); clearInterval(statsLoop);
+}
+
+function roomGone() {
+  stopWatches();
+  store.del('localStorage', HOST_KEY);
+  host = null;
+  toast('방이 지워졌어요.');
+  openSetup();
+}
+
+// 방 상태 → 화면 (이 규칙은 여기 한 곳에만)
+function route() {
+  const view = { waiting: 'lobby', playing: 'play', ended: 'result' }[room.status] || 'lobby';
+  if (view !== currentView) {
+    currentView = view;
+    showView(view);
+    clearInterval(timerLoop); clearInterval(statsLoop);
+    if (view === 'lobby') setupLobby();
+    if (view === 'play') setupPlay();
+    if (view === 'result') setupResult();
+  }
+  render();
+}
+
+// 0.4초에 한 번만 다시 그리기
+function scheduleRender() {
+  if (renderTimer) return;
+  const wait = Math.max(0, 400 - (Date.now() - lastRender));
+  renderTimer = setTimeout(() => { renderTimer = null; render(); }, wait);
+}
+function render() {
+  lastRender = Date.now();
+  if (currentView === 'lobby') renderLobby();
+  if (currentView === 'play') renderPlay();
+  if (currentView === 'result') renderResult();
+}
+
+// ---------------------------------------------------------------------
+// 2. 대기실
+// ---------------------------------------------------------------------
+function setupLobby() {
+  const url = new URL('student.html?code=' + room.id, location.href).href;
+  $('#lobby-code').textContent = room.id;
+  $('#join-url').textContent = url;
+  const qr = qrcode(0, 'M');           // 오류 정정 M 등급 (약 15% 복구)
+  qr.addData(url);
+  qr.make();
+  $('#qr').innerHTML = qr.createSvgTag({ cellSize: 8, margin: 2, scalable: true });
+  const wordMap = new Map(words.map(w => [w.id, w]));
+  $('#lobby-words').replaceChildren(...room.word_ids.map(id =>
+    el('span', { class: 'pill' }, wordMap.get(id) ? wordMap.get(id).correct : '#' + id)));
+  $('#lobby-settings').textContent =
+    `${room.duration_sec / 60}분 · 보물 상자 ${room.bonus_on ? '켬' : '끔'} · 마지막 30초 순위 가리기 ${room.blind_auto ? '켬' : '끔'}`;
+}
+function renderLobby() {
+  const grid = $('#lobby-players');
+  const have = new Set([...grid.children].map(c => c.dataset.id));
+  const now = new Set(players.map(p => p.id));
+  [...grid.children].forEach(c => { if (!now.has(c.dataset.id)) c.remove(); });
+  [...players].sort((a, b) => new Date(a.joined_at) - new Date(b.joined_at)).forEach(p => {
+    if (have.has(p.id)) return;
+    grid.appendChild(el('div', { class: 'player-tile', 'data-id': p.id },
+      el('div', { class: 'ava', 'aria-hidden': 'true' }, animalEmoji(p.animal)),
+      el('div', { class: 'nm' }, p.nickname)));
+  });
+  $('#lobby-count').textContent = players.length;
+  $('#lobby-empty').hidden = players.length > 0;
+  $('#start-btn').disabled = players.length < 1;
+}
+$('#start-btn').addEventListener('click', async () => {
+  $('#start-btn').disabled = true;
+  try { room = await call('start_game', { p_room: host.room_id, p_secret: host.secret }); route(); }
+  catch (e) { toast(e.message); $('#start-btn').disabled = players.length < 1; }
+});
+$('#lobby-delete').addEventListener('click', () => deleteRoom('방을 지울까요? 들어온 학생 기록도 함께 지워져요.'));
+
+// ---------------------------------------------------------------------
+// 3. 게임 중
+// ---------------------------------------------------------------------
+function setupPlay() {
+  $('#race').replaceChildren();
+  raceRows.clear();
+  $('#ring').setAttribute('stroke-dasharray', RING_LEN);
+  timerLoop = setInterval(tick, 250);
+  statsLoop = setInterval(loadStats, 3000);
+  tick(); loadStats();
+}
+
+function tick() {
+  if (!room || room.status !== 'playing') return;
+  const left = secondsLeft(room.ends_at);
+  const frac = Math.max(0, Math.min(1, left / room.duration_sec));
+  $('#t-txt').textContent = mmss(left);
+  $('#ring').setAttribute('stroke-dashoffset', RING_LEN * (1 - frac));
+  $('#ring').setAttribute('stroke', left <= 10 ? '#c23b2c' : left <= 30 ? '#e9b422' : '#2fae8c');
+  $('#timer').classList.toggle('low', left <= 10);
+
+  // 골든 타임 버튼
+  const gLeft = room.golden_until ? (new Date(room.golden_until).getTime() - serverNow()) / 1000 : 0;
+  const gb = $('#golden-btn');
+  if (gLeft > 0) { gb.disabled = true; gb.classList.add('golden-on'); gb.textContent = `✨ 골든 타임 ${Math.ceil(gLeft)}초`; }
+  else { gb.disabled = false; gb.classList.remove('golden-on'); gb.textContent = '✨ 골든 타임 (20초 동안 2점)'; }
+
+  // 블라인드: 선생님이 켰거나, 마지막 30초 자동
+  const blind = room.blind || (room.blind_auto && left <= 30);
+  $('#blind-cover').hidden = !blind;
+  $('#blind-btn').textContent = room.blind ? '👀 순위 다시 보이기' : '🙈 순위 가리기';
+
+  // 0초가 되면 선생님 화면이 자동 종료
+  if (left <= 0 && !ending) {
+    ending = true;
+    call('end_game', { p_room: host.room_id, p_secret: host.secret })
+      .then(r => { room = r; route(); })
+      .catch(() => { ending = false; });
+  }
+}
+
+$('#golden-btn').addEventListener('click', async () => {
+  try { room = await call('set_golden', { p_room: host.room_id, p_secret: host.secret }); addNews('✨ 골든 타임 시작! 20초 동안 정답 2점'); tick(); }
+  catch (e) { toast(e.message); }
+});
+$('#blind-btn').addEventListener('click', async () => {
+  try { room = await call('set_blind', { p_room: host.room_id, p_secret: host.secret, p_on: !room.blind }); tick(); }
+  catch (e) { toast(e.message); }
+});
+$('#end-btn').addEventListener('click', async () => {
+  if (!confirm('게임을 지금 끝낼까요?')) return;
+  try { ending = true; room = await call('end_game', { p_room: host.room_id, p_secret: host.secret }); route(); }
+  catch (e) { ending = false; toast(e.message); }
+});
+
+// 막대 레이스: 줄은 한 번만 만들고 위치만 바꿈 (CSS 가 0.5초 동안 미끄러지게)
+function renderPlay() {
+  const ranked = rankPlayers(players);
+  const top = ranked.slice(0, 12);
+  const max = Math.max(1, ...top.map(p => p.score));
+  const race = $('#race');
+  const keep = new Set(top.map(p => p.id));
+  for (const [id, row] of raceRows) if (!keep.has(id)) { row.el.remove(); raceRows.delete(id); }
+  top.forEach((p, i) => {
+    let row = raceRows.get(p.id);
+    if (!row) {
+      const elRow = el('div', { class: 'race-row' },
+        el('div', { class: 'rk num' }), el('div', { class: 'ava', 'aria-hidden': 'true' }, animalEmoji(p.animal)),
+        el('div', { class: 'nm' }, p.nickname),
+        el('div', { class: 'track' }, el('div', { class: 'bar' })),
+        el('div', { class: 'sc num' }));
+      elRow.style.transform = `translateY(${i * 54}px)`;
+      race.appendChild(elRow);
+      row = { el: elRow, rank: null, t: null };
+      raceRows.set(p.id, row);
+    }
+    row.el.style.transform = `translateY(${i * 54}px)`;
+    row.el.querySelector('.bar').style.width = (p.score > 0 ? Math.max(3, p.score / max * 100) : 0) + '%';
+    row.el.querySelector('.sc').textContent = p.score;
+    // 순위 숫자는 막대가 다 움직인 뒤(0.52초) 바꿈
+    if (row.rank !== i + 1) {
+      const newRank = i + 1;
+      clearTimeout(row.t);
+      row.t = setTimeout(() => {
+        row.rank = newRank;
+        row.el.querySelector('.rk').textContent = newRank;
+        row.el.classList.toggle('top1', newRank === 1);
+        row.el.classList.toggle('top2', newRank === 2);
+        row.el.classList.toggle('top3', newRank === 3);
+      }, row.rank == null ? 0 : 520);
+    }
+  });
+  $('#race-count').textContent = players.length > 12 ? `상위 12명 / 전체 ${players.length}명` : `${players.length}명`;
+  $('#st-players').textContent = players.length;
+}
+
+// 통계: 답안 기록으로 계산 (3초마다)
+async function loadStats() {
+  if (!room) return;
+  const { data, error } = await db.from('answers').select('word_id,is_correct,bonus').eq('room_id', room.id);
+  if (error || !data) return;
+  const total = data.length;
+  const right = data.filter(a => a.is_correct).length;
+  $('#st-total').textContent = total;
+  $('#st-rate').textContent = total ? Math.round(right / total * 100) + '%' : '-';
+  $('#st-box').textContent = data.filter(a => a.bonus > 0).length;
+  const wrongBy = new Map();
+  data.forEach(a => { if (!a.is_correct) wrongBy.set(a.word_id, (wrongBy.get(a.word_id) || 0) + 1); });
+  const hard = [...wrongBy.entries()].sort((a, b) => b[1] - a[1])[0];
+  const w = hard && words.find(x => x.id === hard[0]);
+  $('#st-hard').textContent = w ? `${wordPairText(w)} · ${hard[1]}번` : '-';
+}
+
+// 방금 일어난 일
+function makeNews() {
+  if (!room || room.status !== 'playing') { prevMap = new Map(players.map(p => [p.id, { ...p }])); return; }
+  const left = secondsLeft(room.ends_at);
+  const blind = room.blind || (room.blind_auto && left <= 30);
+  const prevRanked = rankPlayers([...prevMap.values()]).map(p => p.id);
+  const nowRanked = rankPlayers(players).map(p => p.id);
+  for (const p of players) {
+    const before = prevMap.get(p.id);
+    if (!before) continue;
+    if (!firstCorrectDone && p.correct_count > 0) { firstCorrectDone = true; addNews(`🎉 ${p.nickname} 첫 정답!`); }
+    if (p.bonus_total > before.bonus_total) addNews(`🎁 ${p.nickname} 보물 상자 +${p.bonus_total - before.bonus_total}`);
+    const was = prevRanked.indexOf(p.id), is = nowRanked.indexOf(p.id);
+    if (!blind && is > -1 && is < 3 && (was === -1 || was >= 3) && p.score > 0) addNews(`🚀 ${p.nickname} 3위 안으로!`);
+  }
+  prevMap = new Map(players.map(p => [p.id, { ...p }]));
+}
+function addNews(text) {
+  news.unshift(text);
+  news = news.slice(0, 5);
+  $('#news').replaceChildren(...news.map(t => el('li', {}, t)));
+}
+
+// ---------------------------------------------------------------------
+// 4. 결과
+// ---------------------------------------------------------------------
+async function setupResult() {
+  wrongTop = [];
+  try { wrongTop = await call('wrong_words', { p_room: host.room_id, p_secret: host.secret }) || []; } catch (e) {}
+  const list = $('#wrong-list');
+  list.replaceChildren(...wrongTop.map((w, i) => el('li', {},
+    el('div', { class: 'w-top' },
+      el('span', { class: 'pill gold num' }, i + 1),
+      el('span', { class: 'w-word' }, wordPairText(w)),
+      el('span', { class: 'w-rate' }, `${w.wrong_rate}%`)),
+    el('div', { class: 'w-tip' }, `${CATEGORY[w.category]} · ${w.attempts}번 중 ${w.wrongs}번 틀림`),
+    el('div', { class: 'w-tip' }, '💡 ' + w.tip))));
+  $('#wrong-empty').hidden = wrongTop.length > 0;
+  $('#copy-btn').hidden = wrongTop.length === 0;
+}
+
+function renderResult() {
+  const ranked = rankPlayers(players);
+  const meta = p => `정답 ${p.correct_count} · 보너스 +${p.bonus_total}`;
+  const pod = (p, n) => p
+    ? el('div', { class: 'pod p' + n },
+        el('div', { class: 'ava', 'aria-hidden': 'true' }, animalEmoji(p.animal)),
+        el('div', { class: 'nm' }, p.nickname),
+        el('div', { class: 'score' }, p.score + '점'),
+        el('div', { class: 'meta' }, meta(p)),
+        el('div', { class: 'block' }, n))
+    : el('div', { class: 'pod p' + n }, el('div', { class: 'block', style: 'opacity:.25' }, n));
+  // 왼쪽 2위, 가운데 1위, 오른쪽 3위
+  $('#podium').replaceChildren(pod(ranked[1], 2), pod(ranked[0], 1), pod(ranked[2], 3));
+  $('#runners').replaceChildren(...ranked.slice(3, 5).map((p, i) => el('div', { class: 'glass runner' },
+    el('div', { class: 'rk' }, i + 4),
+    el('div', { class: 'ava', 'aria-hidden': 'true' }, animalEmoji(p.animal)),
+    el('div', {}, el('div', { class: 'nm' }, p.nickname), el('div', { class: 'muted' }, `${p.score}점 · ${meta(p)}`)))));
+  $('#rest').replaceChildren(...ranked.slice(5).map((p, i) =>
+    el('div', {}, `${i + 6}. ${animalEmoji(p.animal)} ${p.nickname} · ${p.score}점 (${meta(p)})`)));
+}
+
+$('#copy-btn').addEventListener('click', async () => {
+  const lines = ['맞춤법 탐정단 · 우리 반이 많이 틀린 낱말'];
+  wrongTop.forEach((w, i) => lines.push(`${i + 1}. ${wordPairText(w)} — 오답률 ${w.wrong_rate}% (${w.attempts}번 중 ${w.wrongs}번) · ${w.tip}`));
+  const text = lines.join('\n');
+  try { await navigator.clipboard.writeText(text); toast('복사했어요!'); }
+  catch (e) {
+    const ta = el('textarea', { style: 'position:fixed;opacity:0' });
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); toast('복사했어요!'); } catch (e2) { toast('복사하지 못했어요.'); }
+    ta.remove();
+  }
+});
+
+$('#delete-btn').addEventListener('click', () => deleteRoom('학생 기록을 모두 지울까요? 별명, 점수, 답안이 사라지고 되돌릴 수 없어요.'));
+$('#new-btn').addEventListener('click', () => deleteRoom('이전 방의 학생 기록을 지우고 새 게임을 만들까요?'));
+
+async function deleteRoom(message) {
+  if (!host) { openSetup(); return; }
+  if (!confirm(message)) return;
+  try {
+    await call('delete_room', { p_room: host.room_id, p_secret: host.secret });
+  } catch (e) {
+    if (e.code !== 'no_room') { toast(e.message); return; }
+  }
+  stopWatches();
+  store.del('localStorage', HOST_KEY);
+  host = null; currentView = null;
+  toast('학생 기록을 지웠어요.');
+  openSetup();
+}
+</script>
+</body>
+</html>
